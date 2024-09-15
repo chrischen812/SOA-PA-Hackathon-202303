@@ -1,0 +1,871 @@
+---
+title: "NLP_Tweet_Engagement_1DCNN"
+author: "Christopher Chen"
+date: "2024-05-10"
+output: html_document
+---
+
+#https://www.kaggle.com/code/frankmollard/nlp-basics-tutorial/notebook
+```{r }
+library(data.table)
+library(tm)
+library(ggplot2)
+library(ggwordcloud)
+library(keras)
+library(tensorflow)
+library(plotly)
+library(htmlwidgets)
+library(textclean)
+library(readr)
+library(tidyverse)
+#library(qdap)
+library(DT)
+library(IRdisplay)
+library(dichromat)
+library(reticulate)
+# import("sys", convert = TRUE)$path
+library(gridExtra)
+library(lubridate)
+library(tfruns)
+library(tictoc)
+#RETICULATE_PYTHON ="C:/Users/chris/AppData/Local/Microsoft/WindowsApps/"
+#RETICULATE_PYTHON="C:/Users/chris/miniconda3/python.exe"
+```
+
+#Ensure reproducibility
+```{r }
+#use_session_with_seed(seed = 42, disable_gpu = FALSE, disable_parallel_cpu = FALSE)
+set.seed(123)
+
+tensorflow <- import("tensorflow")
+tensorflow$random$set_seed(123) 
+# Set the environment variable
+#Sys.setenv(TF_ENABLE_ONEDNN_OPTS = "1")
+```
+In the above code, I’ve used the reticulate library to interface with Python from R. The Sys.setenv() function is used to set the TF_ENABLE_ONEDNN_OPTS environment variable to "1". This enables the oneDNN optimizations.
+
+#HyperParameters
+```{r }
+Learning_Rate = .01
+#dec = .00001
+#beta_2 = .95
+batch_size = 16
+eps = 30
+inputShape = 40
+
+filter_size = 8
+kernel_size = 8
+output_dim_size = 8
+dropout_rate = 0.35
+L1_reg_rate = 0.01
+L2_reg_rate = 0.01
+```
+
+```{r }
+dir <- "C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/"
+
+train <- read_csv(paste0(dir,"expert_training_original.csv"))
+
+test <- read_csv(paste0(dir,"expert_testing_Original.csv"))
+
+solution <- read_csv(paste0(dir,"expert_solution.csv"))
+```
+
+#Data prep
+```{r }
+emojis <- c("\U0001F600-\U0001F64F", "\U0001F300-\U0001F5FF", "\U0001F680-\U0001F6FF", "\U0001F1E0-\U0001F1FF", "\U00002702-\U000027B0", "\U000024C2-\U0001F251")
+```
+
+```{r }
+contractions_1 = c( 
+"ain't",
+"aren't",
+"can't",
+"can't've",
+"'cause",
+"could've",
+"couldn't",
+"couldn't've",
+"didn't",
+"doesn't",
+"don't",
+"hadn't",
+"hadn't've",
+"hasn't",
+"haven't",
+"he'd",
+"he'd've",
+"he'll",
+"he'll've",
+"he's",
+"how'd",
+"how'd'y",
+"how'll",
+"how's",
+"I'd",
+"I'd've",
+"I'll",
+"I'll've",
+"I'm",
+"I've",
+"isn't",
+"it'd",
+"it'd've",
+"it'll",
+"it'll've",
+"it's",
+"let's",
+"ma'am",
+"mayn't",
+"might've",
+"mightn't",
+"mightn't've",
+"must've",
+"mustn't",
+"mustn't've",
+"needn't",
+"needn't've",
+"o'clock",
+"oughtn't",
+"oughtn't've",
+"shan't",
+"sha'n't",
+"shan't've",
+"she'd",
+"she'd've",
+"she'll",
+"she'll've",
+"she's",
+"should've",
+"shouldn't",
+"shouldn't've",
+"so've",
+"so's",
+"that'd",
+"that'd've",
+"that's",
+"there'd",
+"there'd've",
+"there's",
+"they'd",
+"they'd've",
+"they'll",
+"they'll've",
+"they're",
+"they've",
+"to've",
+"wasn't",
+"we'd",
+"we'd've",
+"we'll",
+"we'll've",
+"we're",
+"we've",
+"weren't",
+"what'll",
+"what'll've",
+"what're",
+"what's",
+"what've",
+"when's",
+"when've",
+"where'd",
+"where's",
+"where've",
+"who'll",
+"who'll've",
+"who's",
+"who've",
+"why's",
+"why've",
+"will've",
+"won't",
+"won't've",
+"would've",
+"wouldn't",
+"wouldn't've",
+"y'all",
+"y'all'd",
+"y'all'd've",
+"y'all're",
+"y'all've",
+"you'd",
+"you'd've",
+"you'll",
+"you'll've",
+"you're",
+"you've"
+)
+
+contractions_2 = c( 
+"am not",
+"are not",
+"cannot",
+"cannot have",
+"because",
+"could have",
+"could not",
+"could not have",
+"did not",
+"does not",
+"do not",
+"had not",
+"had not have",
+"has not",
+"have not",
+"he would",
+"he would have",
+"he will",
+"he will have",
+"he is",
+"how did",
+"how do you",
+"how will",
+"how is",
+"I would",
+"I would have",
+"I will",
+"I will have",
+"I am",
+"I have",
+"is not",
+"it would",
+"it would have",
+"it will",
+"it will have",
+"it is",
+"let us",
+"madam",
+"may not",
+"might have",
+"might not",
+"might not have",
+"must have",
+"must not",
+"must not have",
+"need not",
+"need not have",
+"of the clock",
+"ought not",
+"ought not have",
+"shall not",
+"shall not",
+"shall not have",
+"she would",
+"she would have",
+"she will",
+"she will have",
+"she is",
+"should have",
+"should not",
+"should not have",
+"so have",
+"so is",
+"that would",
+"that would have",
+"that is",
+"there would",
+"there would have",
+"there is",
+"they would",
+"they would have",
+"they will",
+"they will have",
+"they are",
+"they have",
+"to have",
+"was not",
+"we would",
+"we would have",
+"we will",
+"we will have",
+"we are",
+"we have",
+"were not",
+"what will",
+"what will have",
+"what are",
+"what is",
+"what have",
+"when is",
+"when have",
+"where did",
+"where is",
+"where have",
+"who will",
+"who will have",
+"who is",
+"who have",
+"why is",
+"why have",
+"will have",
+"will not",
+"will not have",
+"would have",
+"would not",
+"would not have",
+"you all",
+"you all would",
+"you all would have",
+"you all are",
+"you all have",
+"you would",
+"you would have",
+"you will",
+"you will have",
+"you are",
+"you have"
+)
+
+contra <- data.frame(contractions_1, contractions_2)
+colnames(contra) <- c("contraction", "expanded")
+```
+
+```{r }
+cleanUp <- function(CORPUS){
+    CORPUS <- tm_map(CORPUS, content_transformer(tolower))
+    CORPUS <- tm_map(CORPUS, content_transformer(function(x){mgsub(x, pattern = emojis, replacement = "")}))
+    CORPUS <- tm_map(CORPUS, content_transformer(function(x){replace_contraction(x, contraction = contra)}))
+    CORPUS <- tm_map(CORPUS, content_transformer(removePunctuation), ucp = F)
+    CORPUS <- tm_map(CORPUS, content_transformer(removeNumbers))
+    CORPUS <- tm_map(CORPUS, removeWords, stopwords("english"))
+    CORPUS <- tm_map(CORPUS, stemDocument, language = "english")
+    CORPUS <- tm_map(CORPUS, content_transformer(function(x){gsub("\\S*http+\\S*", "", x)}))
+    CORPUS <- tm_map(CORPUS, stripWhitespace)
+}
+rmse <- function(y_pred, y_true){
+  y_pred = k_cast(y_pred, dtype="float32")
+  y_true = k_cast(y_true, dtype="float32")
+  rmse = k_sqrt(k_mean(k_square(y_pred - y_true), axis=-1)) 
+  return(rmse)
+}
+concatenate_fields <- function(df) {
+  df$AllFields <- apply(df, 1, paste, collapse = ", ")
+  return(df)
+}
+Calc_RMSE <- function(df_predicted, df_actual){
+t <- merge(x=df_predicted, y=df_actual, by.x="tweet_id", by.y="tweet_id")
+sqrt(mean((t$engagement_count.x - t$engagement_count.y)^2))
+}
+# tokenize text
+tokenize_fun_tr = function(dataset) {
+  c(indices, target, segments) %<-% list(list(),list(),list())
+  for ( i in 1:nrow(dataset)) {
+    c(indices_tok, segments_tok) %<-%  safe_encode(tokenizer, data[[DATA_COLUMN]][i], 
+                                                     max_len=seq_length)
+    indices = indices %>% append(list(as.matrix(indices_tok)))
+    target = target %>% append(dataset[[LABEL_COLUMN]][i])
+    segments = segments %>% append(list(as.matrix(segments_tok)))
+  }
+  return(list(indices,segments, target))
+}
+tokenize_fun_ts = function(dataset) {
+  c(indices, segments) %<-% list(list(),list())
+  for ( i in 1:nrow(dataset)) {
+    c(indices_tok, segments_tok) %<-%  safe_encode(tokenizer, data[[DATA_COLUMN]][i], 
+                                                     max_len=seq_length)
+    indices = indices %>% append(list(as.matrix(indices_tok)))
+    segments = segments %>% append(list(as.matrix(segments_tok)))
+  }
+  return(list(indices,segments))
+}
+# read data
+dt_data_tr = function(dir, rows_to_read){
+  data = data.table::fread(dir, nrows=rows_to_read)
+  c(x_train, x_segment, y_train) %<-% tokenize_fun_tr(data)
+  return(list(x_train, x_segment, y_train))
+}
+dt_data_ts = function(dir, rows_to_read){
+  data = data.table::fread(dir, nrows=rows_to_read)
+  c(x_train, x_segment) %<-% tokenize_fun_ts(data)
+  return(list(x_train, x_segment))
+}
+
+safe_encode <- function(tokenizer, text, max_len) {
+  if (is.null(text) || is.na(text)) {
+    return(tokenizer$encode("", max_len = max_len))
+  }
+  tokenizer$encode(as.character(text), max_len = max_len)
+}
+```
+
+#Feature Engineering 
+```{r }
+
+train$AllFields <- paste0(train$full_text, " from ", train$screen_name, " quote status ", train$is_quote_status, " includes media ", train$includes_media, " includes hashtags ", train$hashtags, " with user mentions ", train$user_mentions, " reply by ", train$in_reply_to_screen_name)
+test$AllFields <- paste0(test$full_text, " from ", test$screen_name, " quote status ", test$is_quote_status, " includes media ", test$includes_media, " includes hashtags ", test$hashtags, " with user mentions ", test$user_mentions, " reply by ", test$in_reply_to_screen_name)
+
+```
+
+```{r, eval= TRUE }
+corpTRAIN <- Corpus(VectorSource(train$AllFields)) %>% cleanUp()
+corpTEST <- Corpus(VectorSource(test$AllFields)) %>% cleanUp()
+text <- unlist(corpTRAIN)
+textTest <- unlist(corpTEST)
+
+text <- as.data.frame(text)
+textTest <- as.data.frame(textTest)
+
+text <- text[1:(nrow(text)-1), ]
+text <- as.data.frame(text)
+#tail(text)
+
+textTest <- textTest[1:(nrow(textTest)-1), ]
+textTest <- as.data.frame(textTest)
+#tail(textTest)
+
+val <- data.frame(train$engagement_count, text$text)
+colnames(val) <- c("target", "text")
+#head(val)
+
+##Tokenizer
+voc_size <- val$text %>%
+                as.character() %>%
+                    paste(., collapse = " ") %>%
+                        strsplit(., split = " ") %>%
+                            unlist() %>%
+                                factor() %>%
+                                    unique() %>%
+                                        length()
+tokenizer <- text_tokenizer(num_words = voc_size)
+tokenizer %>%  fit_text_tokenizer(val$text)
+#tokenizer$word_index %>% head()
+
+text_tr_seqs <- texts_to_sequences(tokenizer, val$text)
+text_te_seqs <- texts_to_sequences(tokenizer, textTest$textTest)
+#head(text_tr_seqs); head(text_te_seqs)
+
+
+x_train <- text_tr_seqs %>% pad_sequences(maxlen = inputShape, padding = "post") 
+x_test <- text_te_seqs %>% pad_sequences(maxlen = inputShape, padding = "post")
+y_train <- val$target
+```
+
+#Keras-BERT Pretrained model setup
+```{r, eval= FALSE }
+pretrained_path = paste0(dir,"/Pretrained_BERT/uncased_L-12_H-768_A-12")
+
+config_path = file.path(pretrained_path, 'bert_config.json')
+checkpoint_path = file.path(pretrained_path, 'bert_model.ckpt')
+vocab_path = file.path(pretrained_path, 'vocab.txt')
+k_bert = import('keras_bert')
+token_dict = k_bert$load_vocabulary(vocab_path)
+tokenizer = k_bert$Tokenizer(token_dict)
+
+seq_length = 50L
+DATA_COLUMN = 'full_text'
+LABEL_COLUMN = 'engagement_count'
+
+model = k_bert$load_trained_model_from_checkpoint(
+  config_path,
+  checkpoint_path,
+  training=T,
+  trainable=T,
+  seq_len=seq_length)
+
+c(x_train,x_tr_segment, y_train) %<-% 
+dt_data_tr(paste0(dir,"expert_training_original.csv"), 26800)
+x_train = do.call(cbind,x_train) %>% t()
+tr_segments = do.call(cbind,x_tr_segment) %>% t()
+y_train = do.call(cbind,y_train) %>% t()
+x_train = c(list(x_train ),list(tr_segments))
+
+c(x_test,x_ts_segment) %<-% 
+dt_data_ts(paste0(dir,"expert_testing_original.csv"), 8950)
+x_test = do.call(cbind,x_test) %>% t()
+ts_segments = do.call(cbind,x_ts_segment) %>% t()
+x_test = c(list(x_test ),list(ts_segments))
+
+```
+
+#Callback Functions
+```{r }
+#Early stopping
+cb_stop <- callback_early_stopping(monitor = 'val_loss', patience = 5)
+
+#CSV Logging
+version <- format(Sys.time(), "%Y%m%d%H%M")
+cb_csv_log <- callback_csv_logger(paste0("C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Log_Dir/log_", version ,".csv"), separator= ",", append = FALSE)
+
+#Learning rate Scheduler
+schedule <- function(epoch, lr) {
+  if (epoch >= 4) {
+    new_lr <- lr * .98
+  } else {
+    new_lr <- lr * 1
+  }
+   return(new_lr)
+}
+cb_scheduler <- callback_learning_rate_scheduler(schedule)
+
+
+#Tensorboard 
+#dir.create("Log_Dir")
+log_dir <- "C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Log_Dir"
+log_files <- list.files(path=paste0(log_dir,"/train/"), pattern ="\\.v2$", full.names = TRUE)
+unlink(log_files)
+log_files <- list.files(path=paste0(log_dir,"/validation/"), pattern ="\\.v2$", full.names = TRUE)
+unlink(log_files)
+cb_tensorboard <-
+  callback_tensorboard(
+      log_dir = log_dir,
+      histogram_freq = 1,
+      embeddings_freq =  1,
+      write_grads = TRUE,
+      write_images = TRUE)
+tensorboard(log_dir, launch_browser = TRUE)
+
+#Lambda
+on_epoch_begin <- function(epoch, logs) {
+  print(paste("Beginning epoch", epoch+1))
+}
+
+on_epoch_end <- function(epoch, logs) {
+  print(paste("Ending epoch", epoch+1, "with logs:"))
+  print(logs)
+}
+
+# Create the lambda callback
+cb_lambda <- callback_lambda(
+  on_epoch_begin = on_epoch_begin,
+  on_epoch_end = on_epoch_end
+)
+
+#Reduce learning rate on plateau
+cb_reduce_lr_plateau <- callback_reduce_lr_on_plateau(
+  monitor = "val_loss",
+  factor = 0.1,
+  patience = 10
+)
+
+#Custom callback
+LossHistory <- R6::R6Class("LossHistory",
+  inherit = KerasCallback,
+  
+  public = list(
+    
+    losses = NULL,
+     
+    on_batch_end = function(batch, logs = list()) {
+      self$losses <- c(self$losses, logs[["loss"]])
+    }
+))
+cb_history <- LossHistory$new()
+
+callbacks_list <- list(cb_stop, cb_csv_log, cb_tensorboard, cb_reduce_lr_plateau, cb_scheduler, cb_history)
+cb_history$losses
+```
+
+```{r, eval= TRUE }
+INPUT3 <- layer_input(shape = c(inputShape))
+
+OUTPUT3 <- INPUT3 %>%
+        layer_embedding(input_dim = voc_size, 
+                      output_dim = output_dim_size
+                         ) %>%
+       layer_dropout(dropout_rate) %>%
+      #layer_batch_normalization() %>%
+        layer_conv_1d(filters = filter_size, 
+                      kernel_size = kernel_size,
+                      activation = "relu",
+                      kernel_initializer = initializer_lecun_normal(seed = 123)
+                      ) %>%
+       layer_dropout(dropout_rate) %>%
+      #layer_batch_normalization() %>%
+        layer_conv_1d(filters = filter_size*2, 
+                      kernel_size = kernel_size,
+                      activation = "relu",
+                      kernel_initializer = initializer_lecun_normal(seed = 123)
+                      ) %>%
+        layer_flatten() %>%
+
+        layer_dense(units = 1L, activation = "linear")
+model3 <- keras_model(list(INPUT3), OUTPUT3)
+summary(model3)
+```
+#USING Pretrained BERT For TOKENIZER
+```{r, eval= FALSE}
+# Define the inputs
+input3_1 <- layer_input(shape = c(inputShape,output_dim_size))
+input3_2 <- layer_input(shape = c(inputShape,output_dim_size))
+input3 <- list(input3_1,input3_2)
+
+# Define the model for each input
+model3_1 <- input3_1  %>%
+  layer_embedding(input_dim = voc_size, 
+                  output_dim = output_dim_size
+                  ) %>%
+  layer_dropout(dropout_rate) %>%
+  layer_conv_1d(filters = filter_size, 
+                kernel_size = kernel_size,
+                activation = "relu",
+                kernel_initializer = initializer_lecun_normal(seed = 123)
+                ) 
+
+model3_2 <- input3_2 %>%
+  layer_embedding(input_dim = voc_size, 
+                  output_dim = output_dim_size
+                  ) %>%
+  layer_dropout(dropout_rate) %>%
+  layer_conv_1d(filters = filter_size, 
+                kernel_size = kernel_size,
+                activation = "relu",
+                kernel_initializer = initializer_lecun_normal(seed = 123)
+                ) 
+
+
+# Apply a dense layer to the combined outputs
+output3 <- layer_concatenate(list(model3_1, model3_2)) %>%
+  layer_dense(units = 1, activation = "linear")
+
+# Create the model
+model3 <- keras_model(inputs = input3, outputs = output3)
+summary(model3)
+```
+
+
+```{r }
+opt=optimizer_adamax(learning_rate = Learning_Rate)
+#opt=optimizer_rmsprop(learning_rate = Learning_Rate)
+model3 %>% keras::compile(
+  loss = "mse",
+  optimizer = opt,
+  metrics = c("mae")
+)
+```
+
+```{r }
+#Validation sets
+# train_size <-floor(0.7*nrow(x_train))
+# train_indices <- sample(seq_len(nrow(x_train)), size = train_size)
+# 
+# # Create the x train/validation sets
+# x_train_tr <- x_train[train_indices, ]
+# x_train_val <- x_train[-train_indices, ]
+# 
+# y_train_tr <- y_train[train_indices ]
+# y_train_val <- y_train[-train_indices ]
+
+```
+
+```{r }
+tic()
+hist3_v <- model3 %>%
+  fit(
+    x_train,
+    y_train,
+    batch_size = batch_size,
+    epochs = eps,
+    validation_split = 0.3,
+    #validation_data = list(x_train_val,  y_train_val),
+    callbacks = callbacks_list,
+    shuffle = TRUE
+  )
+#plot(hist3_v)
+#summary(hist3_v)
+toc()
+
+preds3 <- model3  %>% predict(x_test)
+preds3[preds3<0] <- 0
+label_test <- test$tweet_id
+pred <- data.frame(tweet_id = label_test, engagement_count = (preds3[, 1]))
+VAL_RMSE <- round(Calc_RMSE(pred,solution),1)
+VAL_RMSE
+```
+
+#Retrain
+```{r }
+eps3 = ifelse(cb_stop$stopped_epoch > 0, cb_stop$stopped_epoch, eps)
+eps3
+```
+
+```{r }
+tic()
+hist3 <- model3 %>%
+  fit(
+    x_train,
+    y_train,
+    batch_size = batch_size,
+    epochs = eps3,
+    shuffle = TRUE
+  )
+toc()
+```
+
+```{r }
+results3 <- model3 %>% evaluate(x_train, y_train)
+preds3 <- model3  %>% predict(x_test)
+preds3[preds3<0] <- 0
+```
+
+```{r RMSE function}
+
+label_test <- test$tweet_id
+pred <- data.frame(tweet_id = label_test, engagement_count = (preds3[,1]))
+Calc_RMSE(pred,solution)
+
+RMSE <- floor(Calc_RMSE(pred,solution))
+old_file_name <- paste0("C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Log_Dir/log_", version ,".csv")
+new_file_name  <-paste0("C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Log_Dir/log_", version ,"_", RMSE ,"_",VAL_RMSE,".csv")
+file.rename(from = old_file_name, to = new_file_name)
+
+``` 
+
+950.0374
+945.1001
+962.8919
+960.0608
+952.3684
+960.271
+978.4411
+981.9069
+1081.747
+1081.63
+1083.187
+1080.709
+1081.247
+1088.816
+1082.4
+1085.784
+1085.507
+1084.055
+1080.947
+1080.914
+1085.886
+1087.419
+1087.641
+955.2489
+948.5508
+949.7785
+1015.909
+951.5192
+949.2582
+949.138
+1003.165
+966.6182
+954.0457
+961.3686
+952.6824
+956.8363
+955.2128
+1050.986
+954.2624
+1014.334
+1085.511
+946.0575
+948.3357
+944.7665
+950.2282
+947.4584
+944.3007
+986.5974
+985.4645
+987.1293
+988.0619
+948.156
+947.5478
+987.6998
+990.3642
+947.8342
+944.041
+944.2072
+946.4703
+944.5829
+1089.256
+1087.59
+947.3274
+947.7634
+948.4101
+943.2161
+950.2678
+947.7354
+947.4174
+943.7682
+944.1097
+944.901
+946.7359
+947.1083
+945.1516
+944.5032
+943.8389
+943.8854
+949.7513
+945.7024
+948.2074
+941.2969
+953.5751
+950.669
+945.0523
+946.6463
+946.6463
+947.1044
+
+#RMSE
+Model 1 - 1077.207
+Model 2 - 1071.366
+Model 3 - 929.9498
+Model blend - 1024.552 
+(more epochs accuracy improves)
+
+Sub_XGB - 991.0258 (Public 1560.92459   | Private 599.11411)
+2nd - 935.1697     (Public 1508.48776   | Private 523.65355)
+1st - 918.72901(?) (Public 1493.0535(?) | Private 501.44248)
+#===========================================================
+#RMSE Diff               | Public Diff        | Private Diff
+#2nd - 55.8561           | 52.43683           | 75.46056
+#1st - 72.29679(Approx.) | 67.87109(Approx.)  | 97.67163
+#===========================================================
+
+
+```{r, eval=FALSE }
+# Save the model weights to a HDF5 file
+#save_model_hdf5(model3, "C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Saved_Model/model_05152024_rmse937.h5")
+hf_dir <- "C:/Users/chris/Documents/Projects/GitHub R/SOA PA - Hackathon - 20230324/Saved_Model/model_05152024_rmse937.h5"
+model <- load_model_hdf5(hf_dir)
+#summary(model)
+x_test_tt <- text_te_seqs %>% pad_sequences(maxlen = 40, padding = "post")
+#mode %>% load_model_weights_hdf5(hf_dir)
+preds <- model  %>% predict(x_test_tt)
+preds[preds < 0] <- 0
+pred <- data.frame(tweet_id = test$tweet_id, engagement_count = (preds))
+Calc_RMSE(pred,solution)
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+
+
+
+
+
+
+
+
+
+
